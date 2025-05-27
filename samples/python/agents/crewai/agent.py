@@ -4,13 +4,11 @@ Handles the agents and also presents the tools required.
 """
 
 import base64
-import logging
+from io import BytesIO
 import os
 import re
-
-from collections.abc import AsyncIterable
-from io import BytesIO
-from typing import Any
+import logging
+from typing import Any, AsyncIterable, Dict
 from uuid import uuid4
 
 from PIL import Image
@@ -23,6 +21,8 @@ from google import genai
 from google.genai import types
 from pydantic import BaseModel
 
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -45,21 +45,16 @@ class Imagedata(BaseModel):
     error: str | None = None
 
 
-def get_api_key() -> str:
-    """Helper method to handle API Key."""
-    load_dotenv()
-    return os.getenv('GOOGLE_API_KEY')
-
-
 @tool('ImageGenerationTool')
 def generate_image_tool(
     prompt: str, session_id: str, artifact_file_id: str = None
 ) -> str:
     """Image generation tool that generates images or modifies a given image based on a prompt."""
+
     if not prompt:
         raise ValueError('Prompt cannot be empty')
 
-    client = genai.Client(api_key=get_api_key())
+    client = genai.Client()
     cache = InMemoryCache()
 
     text_input = (
@@ -103,7 +98,7 @@ def generate_image_tool(
 
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash-exp-image-generation',
+            model='gemini-2.0-flash-exp',
             contents=contents,
             config=types.GenerateContentConfig(
                 response_modalities=['Text', 'Image']
@@ -117,6 +112,7 @@ def generate_image_tool(
     for part in response.candidates[0].content.parts:
         if part.inline_data is not None:
             try:
+                print("Creating image data")
                 data = Imagedata(
                     bytes=base64.b64encode(part.inline_data.data).decode(
                         'utf-8'
@@ -146,7 +142,13 @@ class ImageGenerationAgent:
     SUPPORTED_CONTENT_TYPES = ['text', 'text/plain', 'image/png']
 
     def __init__(self):
-        self.model = LLM(model='gemini/gemini-2.0-flash', api_key=get_api_key())
+        if os.getenv('GOOGLE_GENAI_USE_VERTEXAI'):
+            self.model = LLM(model='vertex_ai/gemini-2.0-flash')
+        elif os.getenv('GOOGLE_API_KEY'):
+            self.model = LLM(
+                model='gemini/gemini-2.0-flash',
+                api_key=os.getenv('GOOGLE_API_KEY'),
+            )
 
         self.image_creator_agent = Agent(
             role='Image Creation Expert',
